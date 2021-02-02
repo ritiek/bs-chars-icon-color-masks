@@ -1,0 +1,5 @@
+opencv-python
+numpy
+
+# Required to read .dds texture files, since opencv can't do it by itself
+Pillow
