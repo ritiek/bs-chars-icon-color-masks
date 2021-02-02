@@ -62,3 +62,7 @@ cv2.destroyAllWindows()
 # Save transformed spaz on disk
 cv2.imwrite("transformed_spaz.png", color_spaz)
 ```
+
+You should see neoSpaz with these colors in both cases:
+
+![Transformed Spaz](https://i.imgur.com/6ii6svF.png)
