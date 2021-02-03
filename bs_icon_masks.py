@@ -30,7 +30,8 @@ class ApplyColorMask:
         return image
 
     def _apply_color(self, base_icon, mask, color):
-        color = self._create_blank(color=color)
+        height, width, _ = base_icon.shape
+        color = self._create_blank(width, height, color=color)
         part = cv2.bitwise_and(color, color, mask=mask)
         r,g,b,_ = cv2.split(part)
         part = cv2.merge((r,g,b,mask))
