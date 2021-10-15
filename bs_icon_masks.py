@@ -1,6 +1,28 @@
+from PIL import Image
 import cv2
 import numpy as np
-from PIL import Image
+import os
+import ast
+import asyncio
+from aiohttp import web
+
+routes = web.RouteTableDef()
+
+
+async def parse_tuple(string):
+    try:
+        s = ast.literal_eval(str(string))
+        if type(s) == tuple:
+            return s
+        return
+    except:
+        return
+
+
+async def _get_texture_path(texture):
+    texture = os.path.join(TEXTURE_DIRECTORY, texture) + ".dds"
+    return texture
+
 
 class ApplyColorMask:
     def __init__(self, icon=None, mask=None, main_color=(0,0,0), highlight_color=(0,0,0)):
@@ -52,15 +74,14 @@ class ApplyColorMask:
         base_icon = cv2.add(part_color, base_icon)
         return base_icon
 
-    def _read(self, path):
+    async def _read(self, path):
         image = Image.open(path)
         image = np.array(image)
         image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA)
         return image
 
-    def apply_transformation(self):
-        base_icon = self._read(self._icon)
-        mask = self._read(self._mask)
+    async def apply_transformation(self):
+        base_icon, mask = await asyncio.gather(self._read(self._icon), self._read(self._mask))
         mask = cv2.resize(mask, base_icon.shape[1::-1])
 
         mask_red_channel = mask[:,:,2]
@@ -73,57 +94,24 @@ class ApplyColorMask:
         return base_icon[:,:,:3]
 
 
-import ast
 
-def parse_tuple(string):
+@routes.get("/")
+async def do_GET(request):
+    query_components = request.rel_url.query
     try:
-        s = ast.literal_eval(str(string))
-        if type(s) == tuple:
-            return s
+        icon = query_components["icon"]
+        mask = query_components["mask"]
+        main_color, highlight_color = parse_tuple(query_components["main"]), parse_tuple(query_components["highlight"])
+        main_color, highlight_color = await asyncio.gather(main_color, highlight_color)
+    except KeyError:
         return
-    except:
-        return
-
-
-try:
-    import BaseHTTPServer as Server
-    import urlparse
-except ImportError:
-    import http.server as Server
-    import urllib.parse as urlparse
-
-import os
-
-class ColorMaskServer(Server.BaseHTTPRequestHandler):
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-
-    def _get_texture_path(self, texture):
-        texture = os.path.join(TEXTURE_DIRECTORY, texture) + ".dds"
-        return texture
-
-    def do_GET(self):
-        query_components = urlparse.parse_qs(urlparse.urlparse(self.path).query)
-        try:
-            icon = query_components["icon"][0]
-            mask = query_components["mask"][0]
-            main_color = tuple(map(float, parse_tuple(query_components["main"][0])))
-            highlight_color = tuple(map(float, parse_tuple(query_components["highlight"][0])))
-        except KeyError:
-            return
-        self.send_response(200)
-        filename = "{} with {} ({}, {}).png".format(icon, mask, main_color, highlight_color)
-        self.send_header("Content-Disposition", 'inline; filename="{}"'.format(filename))
-        self.send_header("Content-Type", "image/png")
-        self.end_headers()
-        icon = self._get_texture_path(icon)
-        mask = self._get_texture_path(mask)
-        spaz = ApplyColorMask(icon, mask, main_color, highlight_color)
-        image = spaz.apply_transformation()
-        _, image = cv2.imencode(".png", image)
-        self.wfile.write(image.tobytes())
+    icon, mask = await asyncio.gather(_get_texture_path(icon), _get_texture_path(mask))
+    main_color, highlight_color = tuple(map(float, main_color)), tuple(map(float, highlight_color))
+    filename = "{} with {} ({}, {}).png".format(icon, mask, main_color, highlight_color)
+    spaz = ApplyColorMask(icon, mask, main_color, highlight_color)
+    image = await spaz.apply_transformation()
+    _, image = cv2.imencode(".png", image)
+    return web.Response(body=image.tobytes(), content_type="image/png")
 
 
 if __name__ == "__main__":
@@ -134,9 +122,6 @@ if __name__ == "__main__":
     except IndexError:
         print("Usage: python", sys.argv[0], "<path/to/bombsquad/textures/directory>", "<webserver-port>")
         sys.exit(1)
-    httpd = Server.HTTPServer(("0.0.0.0", PORT), ColorMaskServer)
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        httpd.server_close()
-
+    app = web.Application()
+    app.add_routes(routes)
+    web.run_app(app, host="0.0.0.0", port=PORT)
